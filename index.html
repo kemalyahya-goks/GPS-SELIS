@@ -7,47 +7,18 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; }
-
-    .header {
-      background: #16213e;
-      padding: 12px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #0f3460;
-    }
+    .header { background: #16213e; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #0f3460; }
     .header h1 { font-size: 16px; color: #00d4aa; }
     .status { font-size: 12px; display: flex; align-items: center; gap: 6px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
     .dot.online { background: #00d4aa; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-
-    .stats {
-      background: #16213e;
-      display: flex;
-      gap: 1px;
-      border-bottom: 1px solid #0f3460;
-    }
-    .stat {
-      flex: 1;
-      padding: 10px;
-      text-align: center;
-      background: #1a1a2e;
-    }
+    .stats { background: #16213e; display: flex; gap: 1px; border-bottom: 1px solid #0f3460; }
+    .stat { flex: 1; padding: 10px; text-align: center; background: #1a1a2e; }
     .stat-val { font-size: 20px; font-weight: bold; color: #00d4aa; }
     .stat-label { font-size: 10px; color: #888; margin-top: 2px; }
-
     #map { flex: 1; }
-
-    .bottom-bar {
-      background: #16213e;
-      padding: 8px 16px;
-      font-size: 11px;
-      color: #666;
-      display: flex;
-      justify-content: space-between;
-      border-top: 1px solid #0f3460;
-    }
+    .bottom-bar { background: #16213e; padding: 8px 16px; font-size: 11px; color: #666; display: flex; justify-content: space-between; border-top: 1px solid #0f3460; }
     #last-update { color: #00d4aa; }
   </style>
 </head>
@@ -88,7 +59,8 @@
 </div>
 
 <script>
-  var SHEET_ID     = "1jV_RMKpJQp2wr2x-ONjd_8Eu4f-HInfPqypKZOOFMK4";
+  // URL CSV langsung dari Google Sheets publish
+  var CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQFc2B6hdI-JWW4g1KyoCVRxX2Wg_dg0YOUw3iZi6YC-y0cyYEhW1Gg8XPhU3onofDCPGfacTfXcuW7/pub?gid=0&single=true&output=csv";
   var MAPS_API_KEY = "AIzaSyB6euT0wugdYdU2hsRASv7RXNgdfoM7ndk";
 
   var map, marker, polyline, infoWindow;
@@ -148,37 +120,39 @@
   }
 
   function ambilData() {
-    var url = "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
-              "/gviz/tq?tqx=out:json&sheet=GPS_Log";
-
-    fetch(url)
+    // Fetch CSV langsung dari URL publish
+    fetch(CSV_URL)
       .then(function(r) { return r.text(); })
-      .then(function(text) {
-        var json = JSON.parse(text.substring(47).slice(0, -2));
-        var rows = json.table.rows;
+      .then(function(csv) {
+        var baris = csv.trim().split("\n");
 
-        if (!rows || rows.length === 0) {
+        // Baris pertama = header, ambil baris terakhir = data terbaru
+        if (baris.length < 2) {
           updateStatus(false, "Belum ada data GPS");
           return;
         }
 
-        var last      = rows[rows.length - 1].c;
-        var timestamp = last[0] ? last[0].v : "--";
-        var lat       = last[1] ? parseFloat(last[1].v) : 0;
-        var lng       = last[2] ? parseFloat(last[2].v) : 0;
-        var speed     = last[3] ? parseFloat(last[3].v) : 0;
-        var alt       = last[4] ? parseFloat(last[4].v) : 0;
-        var sat       = last[5] ? parseInt(last[5].v)   : 0;
+        var last = baris[baris.length - 1].split(",");
 
-        if (lat === 0 && lng === 0) {
+        // Kolom: Timestamp, Latitude, Longitude, Speed, Altitude, Satelit, Maps Link
+        var timestamp = last[0] ? last[0].replace(/"/g, "") : "--";
+        var lat       = last[1] ? parseFloat(last[1]) : 0;
+        var lng       = last[2] ? parseFloat(last[2]) : 0;
+        var speed     = last[3] ? parseFloat(last[3]) : 0;
+        var alt       = last[4] ? parseFloat(last[4]) : 0;
+        var sat       = last[5] ? parseInt(last[5])   : 0;
+
+        if (isNaN(lat) || isNaN(lng) || lat === 0 && lng === 0) {
           updateStatus(false, "Data tidak valid");
           return;
         }
 
+        // Update marker & peta
         var pos = { lat: lat, lng: lng };
         marker.setPosition(pos);
         map.panTo(pos);
 
+        // Tambah titik rute jika posisi berubah
         if (lat !== lastLat || lng !== lastLng) {
           rute.push(pos);
           polyline.setPath(rute);
@@ -186,9 +160,10 @@
           lastLng = lng;
         }
 
-        document.getElementById("val-speed").textContent  = speed.toFixed(1);
-        document.getElementById("val-alt").textContent    = alt.toFixed(0);
-        document.getElementById("val-sat").textContent    = sat;
+        // Update stats
+        document.getElementById("val-speed").textContent  = isNaN(speed) ? "--" : speed.toFixed(1);
+        document.getElementById("val-alt").textContent    = isNaN(alt)   ? "--" : alt.toFixed(0);
+        document.getElementById("val-sat").textContent    = isNaN(sat)   ? "--" : sat;
         document.getElementById("val-points").textContent = rute.length;
         document.getElementById("last-update").textContent = timestamp;
 
