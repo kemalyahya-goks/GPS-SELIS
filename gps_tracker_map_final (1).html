@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPS Tracker - Sepeda Listrik</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; }
+
+    .header {
+      background: #16213e;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #0f3460;
+    }
+    .header h1 { font-size: 16px; color: #00d4aa; }
+    .status { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+    .dot.online { background: #00d4aa; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    .stats {
+      background: #16213e;
+      display: flex;
+      gap: 1px;
+      border-bottom: 1px solid #0f3460;
+    }
+    .stat {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      background: #1a1a2e;
+    }
+    .stat-val { font-size: 20px; font-weight: bold; color: #00d4aa; }
+    .stat-label { font-size: 10px; color: #888; margin-top: 2px; }
+
+    #map { flex: 1; }
+
+    .bottom-bar {
+      background: #16213e;
+      padding: 8px 16px;
+      font-size: 11px;
+      color: #666;
+      display: flex;
+      justify-content: space-between;
+      border-top: 1px solid #0f3460;
+    }
+    #last-update { color: #00d4aa; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ GPS Tracker - Sepeda Listrik</h1>
+  <div class="status">
+    <div class="dot" id="status-dot"></div>
+    <span id="status-text">Memuat...</span>
+  </div>
+</div>
+
+<div class="stats">
+  <div class="stat">
+    <div class="stat-val" id="val-speed">--</div>
+    <div class="stat-label">km/h</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val" id="val-alt">--</div>
+    <div class="stat-label">Altitude (m)</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val" id="val-sat">--</div>
+    <div class="stat-label">Satelit</div>
+  </div>
+  <div class="stat">
+    <div class="stat-val" id="val-points">--</div>
+    <div class="stat-label">Titik Rute</div>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<div class="bottom-bar">
+  <span>Update tiap 5 detik</span>
+  <span>Terakhir update: <span id="last-update">--</span></span>
+</div>
+
+<script>
+  var SHEET_ID     = "1jV_RMKpJQp2wr2x-ONjd_8Eu4f-HInfPqypKZOOFMK4";
+  var MAPS_API_KEY = "AIzaSyB6euT0wugdYdU2hsRASv7RXNgdfoM7ndk";
+
+  var map, marker, polyline, infoWindow;
+  var rute = [];
+  var lastLat = 0, lastLng = 0;
+
+  function initMap() {
+    map = new google.maps.Map(document.getElementById("map"), {
+      center: { lat: -6.2, lng: 106.8 },
+      zoom: 16,
+      mapTypeId: "roadmap",
+      styles: [
+        { elementType: "geometry", stylers: [{ color: "#212121" }] },
+        { elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
+        { elementType: "labels.text.stroke", stylers: [{ color: "#212121" }] },
+        { featureType: "road", elementType: "geometry", stylers: [{ color: "#373737" }] },
+        { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#8a8a8a" }] },
+        { featureType: "water", elementType: "geometry", stylers: [{ color: "#000000" }] }
+      ]
+    });
+
+    marker = new google.maps.Marker({
+      map: map,
+      title: "Posisi Sekarang",
+      icon: {
+        path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+        scale: 6,
+        fillColor: "#00d4aa",
+        fillOpacity: 1,
+        strokeColor: "#fff",
+        strokeWeight: 1.5
+      }
+    });
+
+    polyline = new google.maps.Polyline({
+      map: map,
+      strokeColor: "#00d4aa",
+      strokeOpacity: 0.8,
+      strokeWeight: 3
+    });
+
+    infoWindow = new google.maps.InfoWindow();
+
+    marker.addListener("click", function() {
+      infoWindow.setContent(
+        "<div style='color:#000;font-size:13px'>" +
+        "<b>Posisi Terkini</b><br>" +
+        "Lat: " + lastLat.toFixed(6) + "<br>" +
+        "Lng: " + lastLng.toFixed(6) +
+        "</div>"
+      );
+      infoWindow.open(map, marker);
+    });
+
+    ambilData();
+    setInterval(ambilData, 5000);
+  }
+
+  function ambilData() {
+    var url = "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
+              "/gviz/tq?tqx=out:json&sheet=GPS_Log";
+
+    fetch(url)
+      .then(function(r) { return r.text(); })
+      .then(function(text) {
+        var json = JSON.parse(text.substring(47).slice(0, -2));
+        var rows = json.table.rows;
+
+        if (!rows || rows.length === 0) {
+          updateStatus(false, "Belum ada data GPS");
+          return;
+        }
+
+        var last      = rows[rows.length - 1].c;
+        var timestamp = last[0] ? last[0].v : "--";
+        var lat       = last[1] ? parseFloat(last[1].v) : 0;
+        var lng       = last[2] ? parseFloat(last[2].v) : 0;
+        var speed     = last[3] ? parseFloat(last[3].v) : 0;
+        var alt       = last[4] ? parseFloat(last[4].v) : 0;
+        var sat       = last[5] ? parseInt(last[5].v)   : 0;
+
+        if (lat === 0 && lng === 0) {
+          updateStatus(false, "Data tidak valid");
+          return;
+        }
+
+        var pos = { lat: lat, lng: lng };
+        marker.setPosition(pos);
+        map.panTo(pos);
+
+        if (lat !== lastLat || lng !== lastLng) {
+          rute.push(pos);
+          polyline.setPath(rute);
+          lastLat = lat;
+          lastLng = lng;
+        }
+
+        document.getElementById("val-speed").textContent  = speed.toFixed(1);
+        document.getElementById("val-alt").textContent    = alt.toFixed(0);
+        document.getElementById("val-sat").textContent    = sat;
+        document.getElementById("val-points").textContent = rute.length;
+        document.getElementById("last-update").textContent = timestamp;
+
+        updateStatus(true, "Live");
+      })
+      .catch(function(err) {
+        updateStatus(false, "Error: " + err.message);
+      });
+  }
+
+  function updateStatus(online, text) {
+    document.getElementById("status-dot").className = "dot" + (online ? " online" : "");
+    document.getElementById("status-text").textContent = text;
+  }
+</script>
+
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB6euT0wugdYdU2hsRASv7RXNgdfoM7ndk&callback=initMap">
+</script>
+
+</body>
+</html>
