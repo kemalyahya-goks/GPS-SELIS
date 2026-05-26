@@ -59,8 +59,12 @@
 </div>
 
 <script>
-  // URL CSV publish langsung dari Google Sheets
-  var CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQFc2B6hdI-JWW4g1KyoCVRxX2Wg_dg0YOUw3iZi6YC-y0cyYEhW1Gg8XPhU3onofDCPGfacTfXcuW7/pub?gid=0&single=true&output=csv";
+  // ============================================================
+  // Menggunakan Google Apps Script sebagai proxy
+  // agar data selalu fresh tanpa cache
+  // Ganti SCRIPT_URL dengan URL deploy Apps Script kamu
+  // ============================================================
+  var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw7Nng57VP-bdZgALidl7M2pow5yM2cP1UcnK57dwGZaMgb2bOZzhOgrHDXaKgYiXmdkA/exec";
   var MAPS_API_KEY = "AIzaSyB6euT0wugdYdU2hsRASv7RXNgdfoM7ndk";
 
   var map, marker, polyline, infoWindow;
@@ -119,81 +123,39 @@
     setInterval(ambilData, 5000);
   }
 
-  // Parse satu baris CSV dengan benar (handle koma dalam tanda kutip)
-  function parseCSVLine(line) {
-    var result = [];
-    var current = "";
-    var inQuotes = false;
-    for (var i = 0; i < line.length; i++) {
-      var c = line[i];
-      if (c === '"') {
-        inQuotes = !inQuotes;
-      } else if (c === ',' && !inQuotes) {
-        result.push(current.trim());
-        current = "";
-      } else {
-        current += c;
-      }
-    }
-    result.push(current.trim());
-    return result;
-  }
-
   function ambilData() {
-    // Tambah timestamp di URL untuk bypass cache browser
-    var url = CSV_URL + "&t=" + Date.now();
+    // Panggil Apps Script dengan action=read untuk ambil data terbaru
+    var url = SCRIPT_URL + "?action=read&t=" + Date.now();
 
     fetch(url, { cache: "no-store" })
-      .then(function(r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.text();
-      })
-      .then(function(csv) {
-        var baris = csv.trim().split("\n");
+      .then(function(r) { return r.text(); })
+      .then(function(text) {
+        var data = JSON.parse(text);
 
-        // Minimal harus ada header + 1 baris data
-        if (baris.length < 2) {
-          updateStatus(false, "Belum ada data GPS");
+        if (!data || data.status !== "ok") {
+          updateStatus(false, "Gagal ambil data");
           return;
         }
 
-        // Ambil baris terakhir yang valid (mundur dari bawah)
-        var last = null;
-        for (var i = baris.length - 1; i >= 1; i--) {
-          var cols = parseCSVLine(baris[i]);
-          // Kolom: Timestamp, Lat, Lng, Speed, Alt, Sat, MapsLink
-          if (cols.length >= 3) {
-            var testLat = parseFloat(cols[1]);
-            var testLng = parseFloat(cols[2]);
-            if (!isNaN(testLat) && !isNaN(testLng) && testLat !== 0 && testLng !== 0) {
-              last = cols;
-              break;
-            }
-          }
-        }
+        var lat   = parseFloat(data.lat);
+        var lng   = parseFloat(data.lng);
+        var speed = parseFloat(data.speed) || 0;
+        var alt   = parseFloat(data.alt)   || 0;
+        var sat   = parseInt(data.sat)     || 0;
+        var timestamp = data.timestamp     || "--";
 
-        if (!last) {
-          updateStatus(false, "Data koordinat tidak valid");
+        if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) {
+          updateStatus(false, "Data tidak valid");
           return;
         }
 
-        var timestamp = last[0] || "--";
-        var lat   = parseFloat(last[1]);
-        var lng   = parseFloat(last[2]);
-        var speed = parseFloat(last[3]) || 0;
-        var alt   = parseFloat(last[4]) || 0;
-        var sat   = parseInt(last[5])   || 0;
-
-        // Cek apakah data benar-benar baru (timestamp berbeda)
         var isNewData = (timestamp !== lastTimestamp);
         lastTimestamp = timestamp;
 
-        // Update marker
         var pos = { lat: lat, lng: lng };
         marker.setPosition(pos);
         map.panTo(pos);
 
-        // Tambah titik rute hanya jika posisi berubah
         if (Math.abs(lat - lastLat) > 0.000005 || Math.abs(lng - lastLng) > 0.000005) {
           rute.push(pos);
           polyline.setPath(rute);
@@ -201,7 +163,6 @@
           lastLng = lng;
         }
 
-        // Update stats
         document.getElementById("val-speed").textContent  = speed.toFixed(1);
         document.getElementById("val-alt").textContent    = alt.toFixed(0);
         document.getElementById("val-sat").textContent    = sat;
