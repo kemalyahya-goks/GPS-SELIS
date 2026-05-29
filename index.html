@@ -59,7 +59,8 @@
 </div>
 
 <script>
-  var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwGKE1EfPdAjFuBLu0yg9Nu-TocViMAQTvChXYfCKXtlNd2nTZezdEt55k_s7fQuCQlHg/exec";
+  // URL CSV langsung dari Google Sheets publish
+  var CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQFc2B6hdI-JWW4g1KyoCVRxX2Wg_dg0YOUw3iZi6YC-y0cyYEhW1Gg8XPhU3onofDCPGfacTfXcuW7/pub?gid=0&single=true&output=csv";
   var MAPS_API_KEY = "AIzaSyB6euT0wugdYdU2hsRASv7RXNgdfoM7ndk";
 
   var map, marker, polyline, infoWindow;
@@ -119,30 +120,39 @@
   }
 
   function ambilData() {
-    fetch(SCRIPT_URL + "?t=" + Date.now(), { redirect: "follow" })
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        if (!d || d.status === "empty" || d.status === "error") {
-          updateStatus(false, d.status === "empty" ? "Belum ada data" : "Error server");
+    // Fetch CSV langsung dari URL publish
+    fetch(CSV_URL)
+      .then(function(r) { return r.text(); })
+      .then(function(csv) {
+        var baris = csv.trim().split("\n");
+
+        // Baris pertama = header, ambil baris terakhir = data terbaru
+        if (baris.length < 2) {
+          updateStatus(false, "Belum ada data GPS");
           return;
         }
 
-        var lat   = parseFloat(d.lat);
-        var lng   = parseFloat(d.lng);
-        var speed = parseFloat(d.speed);
-        var alt   = parseFloat(d.alt);
-        var sat   = parseInt(d.sat);
-        var timestamp = d.timestamp;
+        var last = baris[baris.length - 1].split(",");
 
-        if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) {
+        // Kolom: Timestamp, Latitude, Longitude, Speed, Altitude, Satelit, Maps Link
+        var timestamp = last[0] ? last[0].replace(/"/g, "") : "--";
+        var lat       = last[1] ? parseFloat(last[1]) : 0;
+        var lng       = last[2] ? parseFloat(last[2]) : 0;
+        var speed     = last[3] ? parseFloat(last[3]) : 0;
+        var alt       = last[4] ? parseFloat(last[4]) : 0;
+        var sat       = last[5] ? parseInt(last[5])   : 0;
+
+        if (isNaN(lat) || isNaN(lng) || lat === 0 && lng === 0) {
           updateStatus(false, "Data tidak valid");
           return;
         }
 
+        // Update marker & peta
         var pos = { lat: lat, lng: lng };
         marker.setPosition(pos);
         map.panTo(pos);
 
+        // Tambah titik rute jika posisi berubah
         if (lat !== lastLat || lng !== lastLng) {
           rute.push(pos);
           polyline.setPath(rute);
@@ -150,6 +160,7 @@
           lastLng = lng;
         }
 
+        // Update stats
         document.getElementById("val-speed").textContent  = isNaN(speed) ? "--" : speed.toFixed(1);
         document.getElementById("val-alt").textContent    = isNaN(alt)   ? "--" : alt.toFixed(0);
         document.getElementById("val-sat").textContent    = isNaN(sat)   ? "--" : sat;
@@ -159,7 +170,7 @@
         updateStatus(true, "Live");
       })
       .catch(function(err) {
-        updateStatus(false, "Gagal fetch: " + err.message);
+        updateStatus(false, "Error: " + err.message);
       });
   }
 
